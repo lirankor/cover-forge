@@ -1,0 +1,8 @@
+.env
+/data/
+node_modules/
+backfill-out/
+*.log
+/samples/
+/review/
+.DS_Store

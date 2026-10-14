@@ -1,0 +1,19 @@
+{
+  "name": "cover-forge",
+  "version": "1.0.0",
+  "description": "Deterministic print-style placeholder album covers from metadata (headless Chromium, Hebrew/RTL aware)",
+  "license": "MIT",
+  "author": "Liran Koren",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.mjs",
+    "backfill": "node bin/backfill-jellyfin.mjs"
+  },
+  "dependencies": {
+    "puppeteer": "^24.0.0"
+  }
+}

@@ -1,0 +1,23 @@
+cover-forge — MIT License, Copyright (c) 2026 Liran Koren (see LICENSE).
+
+Third-party components bundled in the Docker image
+--------------------------------------------------
+Heebo (variable font, weights 100-900)
+  Copyright 2014 The Heebo Project Authors (https://github.com/OdedEzer/heebo)
+  SIL Open Font License 1.1 — fonts/OFL-Heebo.txt
+  Downloaded at image build time from https://github.com/google/fonts/tree/main/ofl/heebo
+
+Alef (Regular, Bold)
+  Copyright (c) 2012 HaGilda & Mushon Zer-Aviv, with Reserved Font Name Alef
+  SIL Open Font License 1.1 — fonts/OFL-Alef.txt
+  Downloaded at image build time from https://github.com/google/fonts/tree/main/ofl/alef
+
+Noto Sans (Debian package fonts-noto-core) — SIL OFL 1.1 — glyph fallback for scripts Heebo/Alef lack.
+Chromium (Debian package) — BSD-style licences (/usr/share/doc/chromium/copyright in the image).
+puppeteer — Apache-2.0.
+
+Design credit
+-------------
+The four cover layouts (Banner, Year stack, Twin suns, Press slug), the ink/paper palettes, the
+hash-based colour picking, grain and paper fade were designed in Claude Design ("Album Cover
+Placeholder") and ported 1:1 to lib/design.js.

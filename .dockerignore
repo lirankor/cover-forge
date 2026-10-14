@@ -1,0 +1,9 @@
+.git
+.env
+data
+node_modules
+backfill-out
+docs
+review
+samples
+*.md
