@@ -22,6 +22,8 @@ export const CONFIG = {
   maxSize: Number(env('MAX_SIZE', 2000)),
   defaultSize: Number(env('DEFAULT_SIZE', 1000)),
   executablePath: env('PUPPETEER_EXECUTABLE_PATH', undefined),
+  protocolTimeoutMs: Number(env('PROTOCOL_TIMEOUT_MS', 30000)),   // a render never takes >5 s; 30 s = something is wrong
+  relaunchAfterFailures: Number(env('RELAUNCH_AFTER_FAILURES', 2)), // consecutive broken pages → restart the whole browser
 };
 
 // ---------- params ----------
@@ -57,7 +59,7 @@ class Pool {
     if (this.launching) return this.launching;
     this.launching = (async () => {
       this.browser = await puppeteer.launch({
-        headless: true, executablePath: CONFIG.executablePath,
+        headless: true, executablePath: CONFIG.executablePath, protocolTimeout: CONFIG.protocolTimeoutMs,
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--hide-scrollbars',
           '--force-color-profile=srgb', '--font-render-hinting=none', '--disable-lcd-text', '--no-first-run', '--no-zygote'],
       });
@@ -76,19 +78,36 @@ class Pool {
     return page;
   }
   async acquire() {
-    if (!this.browser) await this.launch();
+    if (!this.browser && !this.launching) await this.launch();
+    else if (this.launching) await this.launching;
     if (this.free.length) return this.free.pop();
     return new Promise(res => this.waiters.push(res));
   }
   release(page, broken) {
-    if (broken) { page.close().catch(() => {}); this.newPage().then(p => this.release(p, false)).catch(() => {}); return; }
+    if (broken) {
+      this.failures = (this.failures || 0) + 1;
+      page.close().catch(() => {});
+      if (this.failures >= CONFIG.relaunchAfterFailures) { this.relaunch().catch(e => console.error('relaunch failed:', e.message)); return; }
+      this.newPage().then(p => this.release(p, false)).catch(() => this.relaunch().catch(() => {}));
+      return;
+    }
+    this.failures = 0;
     const w = this.waiters.shift();
     if (w) w(page); else this.free.push(page);
+  }
+  // Kill and restart Chromium; queued waiters get fresh pages once it is back.
+  async relaunch() {
+    console.warn('pool: relaunching Chromium after repeated render failures');
+    const b = this.browser; this.browser = null; this.free = []; this.failures = 0;
+    if (b) { b.removeAllListeners('disconnected'); await Promise.race([b.close(), new Promise(r => setTimeout(r, 5000))]).catch(() => {}); try { b.process()?.kill('SIGKILL'); } catch { /* */ } }
+    await this.launch();
+    stats.relaunches++;
+    while (this.waiters.length && this.free.length) this.waiters.shift()(this.free.pop());
   }
   async close() { const b = this.browser; this.browser = null; if (b) await b.close().catch(() => {}); }
 }
 const pool = new Pool(CONFIG.pages);
-const stats = { renders: 0, cacheHits: 0, errors: 0, msTotal: 0, msLast: 0, started: Date.now() };
+const stats = { renders: 0, cacheHits: 0, errors: 0, relaunches: 0, msTotal: 0, msLast: 0, started: Date.now() };
 
 // Render one fragment (w×h design px) at the given output width; returns PNG bytes.
 async function render(html, w, h, outWidth) {
@@ -159,7 +178,7 @@ async function handle(req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405).end(); return; }
   if (url.pathname === '/healthz') {
     const body = JSON.stringify({ ok: !!pool.browser, pages: CONFIG.pages, free: pool.free.length, renders: stats.renders, cacheHits: stats.cacheHits,
-      errors: stats.errors, avgMs: stats.renders ? Math.round(stats.msTotal / stats.renders) : null, lastMs: stats.msLast,
+      errors: stats.errors, relaunches: stats.relaunches, avgMs: stats.renders ? Math.round(stats.msTotal / stats.renders) : null, lastMs: stats.msLast,
       rssMb: Math.round(process.memoryUsage().rss / 1048576), uptimeSec: Math.round((Date.now() - stats.started) / 1000) });
     res.writeHead(pool.browser ? 200 : 503, { 'content-type': 'application/json' }).end(body); return;
   }

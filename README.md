@@ -100,13 +100,17 @@ docker compose exec cover-forge node bin/backfill-jellyfin.mjs --apply
 | `--dry-run` (default) | print the plan, write the PNGs to `--out` (default `backfill-out/`), upload nothing |
 | `--apply` | upload via `POST /Items/{id}/Images/Primary` |
 | `--limit N` | stop after N items |
-| `--refresh` | re-render items already in the ledger; an item that now has a *different* primary image than the one we uploaded is left alone |
+| `--refresh` | re-render ledger items whose metadata changed (add `--force` for all of ours); an item that now has a *different* primary image than the one we uploaded is left alone |
 | `--artists` | include `MusicArtist` items (title = artist name) |
 | `--size N`, `--seed N` | passed through to the renderer |
 | `--ledger PATH` | default `/data/ledger.json` — `{items: {<itemId>: {hash, layout, jfTag, uploadedAt}}}` |
+| `--revert` | undo: `DELETE` the primary image of every ledger entry whose current image is still ours (dry-run unless `--apply`); real covers that replaced ours are kept |
 
 Items that already have a primary image are never touched. Cover metadata: album artist, album
-name, `ProductionYear`, first studio as the label. Run it from cron / a systemd timer after Jellyfin's
+name, `ProductionYear`, first studio as the label. Folder-derived names are cleaned first
+(`lib/normalize.js`): a leading `(1968) ` / `[1968] ` / `1968 - ` or trailing ` (1968)` is stripped when
+it matches the album's year (or adopted as the year if the album has none), and a disc/track-style
+`2 - ` / `1. ` prefix is dropped; every change is logged `before → after`. The renderer itself stays literal. Run it from cron / a systemd timer after Jellyfin's
 own "download missing images" task, so real artwork wins.
 
 ## Development
