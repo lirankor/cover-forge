@@ -47,7 +47,7 @@ export function viewModel(p) {
   return { a, layout: p.layout || a.layout };
 }
 const cacheKey = (kind, p, layout) =>
-  createHash('sha256').update(JSON.stringify([kind, 4, layout, p.artist, p.title, p.year, p.label, p.cat, p.seed, p.size, p.grain, p.fade])).digest('hex');
+  createHash('sha256').update(JSON.stringify([kind, 5, layout, p.artist, p.title, p.year, p.label, p.cat, p.seed, p.size, p.grain, p.fade])).digest('hex');
 
 // ---------- page pool ----------
 const SHELL = `<!doctype html><html><head><meta charset="utf-8"><style>${BASE_CSS}</style></head><body><div id="root"></div></body></html>`;

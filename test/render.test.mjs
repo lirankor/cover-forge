@@ -29,6 +29,9 @@ test('design hash + palette are the Claude Design values', () => {
   assert.equal(a.yearShort, "'74"); assert.match(a.cat, /^NC-\d{4}$/);
   assert.equal(a.titleSize, '34px'); // 13 chars → mid
   assert.ok(LAYOUTS.includes(a.layout));
+  const noYear = build({ artist: 'X', title: 'No Year' }, 0);
+  assert.equal(noYear.hasYear, false); assert.notEqual(noYear.layout, '1b', 'no year → 1b is never auto-picked');
+  for (let seed = 0; seed < 50; seed++) assert.notEqual(build({ artist: 'X', title: 'Seed ' + seed }).layout, '1b');
   const b = build({ artist: 'The Velvet Lowlands', title: 'Summer Static' }, 3);
   assert.ok(b.ink1 !== a.ink1 || b.paper !== a.paper || b.layout !== a.layout, 'seed changes something');
 });
