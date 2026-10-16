@@ -50,8 +50,8 @@ texts in [`fonts/`](fonts/), credits in [`NOTICE`](NOTICE):
 ## Run
 
 ```bash
-cp .env.example .env            # optional: TOKEN, PUID/PGID, Jellyfin settings
-mkdir -p data                   # cache + ledger (bind-mounted as /data)
+cp .env.example .env            # optional: TOKEN, PUID/PGID, HOST_DATA_DIR, Jellyfin settings
+mkdir -p data                   # cache + ledger (bind-mounted as /data; or the dir HOST_DATA_DIR points at)
 docker compose up -d --build    # publishes 127.0.0.1:8793
 curl -o cover.png 'http://127.0.0.1:8793/cover.png?artist=The+Velvet+Lowlands&title=Summer+Static&year=1974&label=Harbor+Records'
 ```
@@ -64,7 +64,8 @@ docker run -d --name cover-forge -p 127.0.0.1:8793:8793 -v "$PWD/data:/data" --u
 ```
 
 The container runs as the uid you give it (`PUID`/`PGID` in `.env`, default 1000) so it can write to
-the bind-mounted `./data`. Memory: ~100 MB idle, ~350–420 MB after large renders (compose caps it at
+the bind-mounted data dir (`HOST_DATA_DIR` in `.env`, default `./data`; keep it in your backups if you use
+the Jellyfin backfill — `ledger.json` is what protects real covers). Memory: ~100 MB idle, ~350–420 MB after large renders (compose caps it at
 512 MB). A warm 1000 px render takes ~150 ms, a 2000 px one ~400 ms; cache hits are served from disk.
 
 ## API

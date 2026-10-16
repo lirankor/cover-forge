@@ -12,9 +12,11 @@ services:
         required: false
     environment:
       PORT: "8793"
-    # uid:gid that owns ./data on the host (see .env.example)
+    # uid:gid that owns the data dir on the host (see .env.example)
     user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       - "127.0.0.1:8793:8793"
+    # Render cache + Jellyfin backfill ledger. HOST_DATA_DIR (host side) defaults to ./data next to this file;
+    # not DATA_DIR, which is the in-container path the server reads (/data).
     volumes:
-      - ./data:/data
+      - ${HOST_DATA_DIR:-./data}:/data
