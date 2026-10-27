@@ -72,3 +72,14 @@ Facts about MA that the implementation must match (verified against MA server **
   do not break enrichment.
 - Unit tests for the fallback rule, the path encoding and `resolve_image`.
 - `ruff`, `mypy` and `pytest` clean in the MA repo; `node --test` clean in cover-forge.
+
+## Update 2026-10-27: scope is placeholders only
+
+Real covers are no longer the provider's problem. The reference deployment keeps every cover it already had
+(exported from the previous media server as `folder.jpg` / `artist.jpg` in a side store that mirrors the
+music tree) and presents that store to MA through a read-only overlay mount on top of the music folder, so
+MA's own filesystem provider reads them natively. The provider therefore only has to cover the albums and
+artists that still have **no image after every other metadata provider ran** (local files, MusicBrainz /
+Cover Art Archive, TheAudioDB, fanart.tv, iTunes). Keep the "run last, return nothing when an image already
+exists" rule from section 1; nothing else changes. `kind=artist` in the renderer contract (section 3) is still
+wanted so artist tiles get a placeholder too.
