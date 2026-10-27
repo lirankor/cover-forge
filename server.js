@@ -1,6 +1,7 @@
 // cover-forge — deterministic print-style placeholder album covers, rendered by headless Chromium.
 //   GET /cover.png?artist=&title=&year=&label=&cat=&layout=1a|1b|1c|1d&seed=0&size=1000[&grain=0&fade=0.14]
 //   GET /sheet.png?<same>        2x2 contact sheet of all four layouts
+//   &format=jpeg (or /cover.jpg, /sheet.jpg) returns a JPEG (quality JPEG_QUALITY, default 90) instead of a PNG
 //   GET /healthz                 {"ok":true,...}
 // Auth: if TOKEN is set, `Authorization: Bearer <TOKEN>` or `?token=` is required (healthz stays open).
 import http from 'node:http';
@@ -21,6 +22,7 @@ export const CONFIG = {
   pages: Math.max(1, Number(env('PAGES', 2))),
   maxSize: Number(env('MAX_SIZE', 2000)),
   defaultSize: Number(env('DEFAULT_SIZE', 1000)),
+  jpegQuality: Math.max(1, Math.min(100, Number(env('JPEG_QUALITY', 90)) || 90)),
   executablePath: env('PUPPETEER_EXECUTABLE_PATH', undefined),
   protocolTimeoutMs: Number(env('PROTOCOL_TIMEOUT_MS', 30000)),   // a render never takes >5 s; 30 s = something is wrong
   relaunchAfterFailures: Number(env('RELAUNCH_AFTER_FAILURES', 2)), // consecutive broken pages → restart the whole browser
@@ -37,6 +39,7 @@ export function normalizeParams(q) {
     grain: q.get('grain') !== '0' && q.get('grain') !== 'false',
     fade: q.has('fade') ? Math.max(0, Math.min(0.5, Number(q.get('fade')))) : FADE_DEFAULT,
     layout: (q.get('layout') || '').toLowerCase(),
+    format: ['jpeg', 'jpg'].includes((q.get('format') || '').toLowerCase()) ? 'jpeg' : 'png',
   };
   if (!Number.isFinite(p.size) || p.size < 64) p.size = 64;
   if (p.size > CONFIG.maxSize) p.size = CONFIG.maxSize;
@@ -48,8 +51,10 @@ export function viewModel(p) {
   const a = build({ artist: p.artist, title: p.title, year: p.year, label: p.label, cat: p.cat }, p.seed);
   return { a, layout: p.layout || a.layout };
 }
+// PNG keys are unchanged from before JPEG support (existing cache stays valid); JPEG adds format + quality.
 const cacheKey = (kind, p, layout) =>
-  createHash('sha256').update(JSON.stringify([kind, 5, layout, p.artist, p.title, p.year, p.label, p.cat, p.seed, p.size, p.grain, p.fade])).digest('hex');
+  createHash('sha256').update(JSON.stringify([kind, 5, layout, p.artist, p.title, p.year, p.label, p.cat, p.seed, p.size, p.grain, p.fade,
+    ...(p.format === 'jpeg' ? ['jpeg', CONFIG.jpegQuality] : [])])).digest('hex');
 
 // ---------- page pool ----------
 const SHELL = `<!doctype html><html><head><meta charset="utf-8"><style>${BASE_CSS}</style></head><body><div id="root"></div></body></html>`;
@@ -109,8 +114,8 @@ class Pool {
 const pool = new Pool(CONFIG.pages);
 const stats = { renders: 0, cacheHits: 0, errors: 0, relaunches: 0, msTotal: 0, msLast: 0, started: Date.now() };
 
-// Render one fragment (w×h design px) at the given output width; returns PNG bytes.
-async function render(html, w, h, outWidth) {
+// Render one fragment (w×h design px) at the given output width; returns PNG (or JPEG) bytes.
+async function render(html, w, h, outWidth, format = 'png') {
   const dsf = outWidth / w;
   const page = await pool.acquire();
   let broken = false;
@@ -129,14 +134,15 @@ async function render(html, w, h, outWidth) {
     await page.evaluate(h => { document.getElementById('root').innerHTML = h; }, html);
     await page.evaluate(FIT_SCRIPT);
     await page.evaluate(PAINT_READY);
-    return await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width: w, height: h }, omitBackground: false, optimizeForSpeed: true });
+    const shot = format === 'jpeg' ? { type: 'jpeg', quality: CONFIG.jpegQuality } : { type: 'png', optimizeForSpeed: true };
+    return await page.screenshot({ ...shot, clip: { x: 0, y: 0, width: w, height: h }, omitBackground: false });
   } catch (e) { broken = true; throw e; } finally { pool.release(page, broken); }
 }
 
 // ---------- cache ----------
 const cacheDir = () => path.join(CONFIG.dataDir, 'cache');
-async function cached(key, produce) {
-  const file = path.join(cacheDir(), key.slice(0, 2), key + '.png');
+async function cached(key, produce, ext = 'png') {
+  const file = path.join(cacheDir(), key.slice(0, 2), key + '.' + ext);
   try { const b = await fs.readFile(file); stats.cacheHits++; return b; } catch { /* miss */ }
   const buf = await produce();
   try {
@@ -151,19 +157,19 @@ export async function renderCover(p) {
   const { a, layout } = viewModel(p);
   return cached(cacheKey('cover', p, layout), async () => {
     const t = Date.now();
-    const buf = await render(coverHtml(a, layout, { grain: p.grain, fade: p.fade }), COVER_PX, COVER_PX, p.size);
+    const buf = await render(coverHtml(a, layout, { grain: p.grain, fade: p.fade }), COVER_PX, COVER_PX, p.size, p.format);
     stats.renders++; stats.msLast = Date.now() - t; stats.msTotal += stats.msLast;
     return buf;
-  });
+  }, p.format === 'jpeg' ? 'jpg' : 'png');
 }
 export async function renderSheet(p) {
   const { a } = viewModel(p);
   return cached(cacheKey('sheet', p, '*'), async () => {
     const t = Date.now();
-    const buf = await render(sheetHtml(a, { grain: p.grain, fade: p.fade }), SHEET_W, SHEET_H, p.size);
+    const buf = await render(sheetHtml(a, { grain: p.grain, fade: p.fade }), SHEET_W, SHEET_H, p.size, p.format);
     stats.renders++; stats.msLast = Date.now() - t; stats.msTotal += stats.msLast;
     return buf;
-  });
+  }, p.format === 'jpeg' ? 'jpg' : 'png');
 }
 
 // ---------- http ----------
@@ -182,16 +188,17 @@ async function handle(req, res) {
       rssMb: Math.round(process.memoryUsage().rss / 1048576), uptimeSec: Math.round((Date.now() - stats.started) / 1000) });
     res.writeHead(pool.browser ? 200 : 503, { 'content-type': 'application/json' }).end(body); return;
   }
-  if (url.pathname !== '/cover.png' && url.pathname !== '/sheet.png') { res.writeHead(404, { 'content-type': 'text/plain' }).end('not found'); return; }
+  const route = { '/cover.png': 'cover', '/sheet.png': 'sheet', '/cover.jpg': 'cover', '/sheet.jpg': 'sheet' }[url.pathname];
+  if (!route) { res.writeHead(404, { 'content-type': 'text/plain' }).end('not found'); return; }
   if (!authorized(req, q)) { res.writeHead(401, { 'content-type': 'text/plain' }).end('unauthorized'); return; }
   let p;
-  try { p = normalizeParams(q); } catch (e) { res.writeHead(e.status || 400, { 'content-type': 'text/plain' }).end(e.message); return; }
+  try { p = normalizeParams(q); if (url.pathname.endsWith('.jpg')) p.format = 'jpeg'; } catch (e) { res.writeHead(e.status || 400, { 'content-type': 'text/plain' }).end(e.message); return; }
   const { a, layout } = viewModel(p);
   try {
-    const buf = url.pathname === '/sheet.png' ? await renderSheet(p) : await renderCover(p);
+    const buf = route === 'sheet' ? await renderSheet(p) : await renderCover(p);
     const etag = '"' + createHash('sha1').update(buf).digest('hex').slice(0, 20) + '"';
     if (req.headers['if-none-match'] === etag) { res.writeHead(304).end(); return; }
-    res.writeHead(200, { 'content-type': 'image/png', 'content-length': buf.length, 'cache-control': 'public, max-age=31536000, immutable', etag,
+    res.writeHead(200, { 'content-type': p.format === 'jpeg' ? 'image/jpeg' : 'image/png', 'content-length': buf.length, 'cache-control': 'public, max-age=31536000, immutable', etag,
       'x-cover-layout': layout, 'x-cover-ink': a.ink1, 'x-cover-cat': a.cat });
     res.end(req.method === 'HEAD' ? undefined : buf);
   } catch (e) {

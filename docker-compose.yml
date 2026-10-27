@@ -20,3 +20,6 @@ services:
     # not DATA_DIR, which is the in-container path the server reads (/data).
     volumes:
       - ${HOST_DATA_DIR:-./data}:/data
+      # Music tree for bin/backfill-folder.mjs (writes folder.jpg into album folders) — read-write, seen as MUSIC_ROOT (/music).
+      # MUSIC_DIR (host side) defaults to an empty ./music next to this file, i.e. effectively off until you point it at your library.
+      - ${MUSIC_DIR:-./music}:/music

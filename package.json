@@ -11,7 +11,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test test/*.test.mjs",
-    "backfill": "node bin/backfill-jellyfin.mjs"
+    "backfill": "node bin/backfill-jellyfin.mjs",
+    "backfill-folder": "node bin/backfill-folder.mjs"
   },
   "dependencies": {
     "puppeteer": "^24.0.0"

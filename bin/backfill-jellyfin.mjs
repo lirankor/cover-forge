@@ -20,8 +20,7 @@
 //     image tag is still the one we recorded (a real cover that replaced ours is kept); dry-run unless --apply
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
-import { normalizeTitle } from '../lib/normalize.js';
+import { createJellyfin, createForge, loadLedger as readLedger, saveLedger as writeLedger, metaForItem, metaHash as hashMeta, metaLabel } from '../lib/backfill-common.js';
 
 const args = process.argv.slice(2);
 const flag = n => args.includes(n);
@@ -36,60 +35,20 @@ const OUT = opt('--out', 'backfill-out');
 const SIZE = Number(opt('--size', 1000)) || 1000;
 const SEED = Number(opt('--seed', 0)) || 0;
 const LEDGER = opt('--ledger', process.env.LEDGER || '/data/ledger.json');
-const JF = (process.env.JELLYFIN_URL || '').replace(/\/+$/, '');
-const KEY = process.env.JELLYFIN_API_KEY || '';
 const USER = process.env.JELLYFIN_USER_ID || '';
-const FORGE = (process.env.COVER_FORGE_URL || 'http://127.0.0.1:8793').replace(/\/+$/, '');
-const FORGE_TOKEN = process.env.COVER_FORGE_TOKEN || process.env.TOKEN || '';
-if (!JF || !KEY) { console.error('JELLYFIN_URL and JELLYFIN_API_KEY are required'); process.exit(2); }
+const client = createJellyfin({ url: process.env.JELLYFIN_URL, key: process.env.JELLYFIN_API_KEY, user: USER });
+if (!client.configured) { console.error('JELLYFIN_URL and JELLYFIN_API_KEY are required'); process.exit(2); }
+const { jf, listItems } = client;
+const forge = createForge({ url: process.env.COVER_FORGE_URL, token: process.env.COVER_FORGE_TOKEN || process.env.TOKEN || '', size: SIZE, seed: SEED });
 
-const jfHeaders = { Authorization: `MediaBrowser Token="${KEY}", Client="cover-forge", Device="cover-forge", DeviceId="cover-forge-backfill", Version="1.0"` };
-async function jf(p, init = {}) {
-  const r = await fetch(JF + p, { ...init, headers: { ...jfHeaders, ...(init.headers || {}) } });
-  if (!r.ok) throw new Error(`Jellyfin ${init.method || 'GET'} ${p} → ${r.status} ${await r.text().catch(() => '')}`.slice(0, 300));
-  return r;
-}
-async function listItems(type) {
-  const q = new URLSearchParams({ IncludeItemTypes: type, Recursive: 'true', Fields: 'Studios,ProductionYear,ImageTags,AlbumArtist,AlbumArtists,Artists', SortBy: 'SortName', SortOrder: 'Ascending', EnableImages: 'true' });
-  if (USER) q.set('userId', USER);
-  const { Items = [] } = await (await jf('/Items?' + q)).json();
-  return Items;
-}
 const hasPrimary = it => !!(it.ImageTags && it.ImageTags.Primary);
 const metaCache = new Map();
 function metaFor(it) {
-  if (metaCache.has(it.Id)) return metaCache.get(it.Id);
-  const m = metaForUncached(it); metaCache.set(it.Id, m); return m;
+  if (!metaCache.has(it.Id)) metaCache.set(it.Id, metaForItem(it, m => console.log(m)));
+  return metaCache.get(it.Id);
 }
-function metaForUncached(it) {
-  if (it.Type === 'MusicArtist') return { artist: '', title: it.Name || '', year: it.ProductionYear ? String(it.ProductionYear) : '', label: '' };
-  // folder-derived names like "(1968) Shine On Brightly" / "2 - Greatest Hits II" → cleaned title (+ year if it had none)
-  const n = normalizeTitle(it.Name || '', it.ProductionYear ? String(it.ProductionYear) : '');
-  if (n.changed) console.log(`  title ${JSON.stringify(it.Name)} → ${JSON.stringify(n.title)}${n.year && !it.ProductionYear ? ' (year ' + n.year + ')' : ''}`);
-  return {
-    artist: it.AlbumArtist || it.AlbumArtists?.[0]?.Name || it.Artists?.[0] || '',
-    title: n.title,
-    year: n.year,
-    label: it.Studios?.[0]?.Name || '',
-  };
-}
-async function loadLedger() {
-  try { const l = JSON.parse(await fs.readFile(LEDGER, 'utf8')); return l.items ? l : { version: 1, items: {} }; }
-  catch { return { version: 1, items: {} }; }
-}
-async function saveLedger(l) {
-  await fs.mkdir(path.dirname(LEDGER), { recursive: true });
-  const tmp = LEDGER + '.tmp'; await fs.writeFile(tmp, JSON.stringify(l, null, 1)); await fs.rename(tmp, LEDGER);
-}
-async function forge(meta, attempt = 1) {
-  const q = new URLSearchParams({ ...meta, size: String(SIZE), seed: String(SEED) });
-  const r = await fetch(`${FORGE}/cover.png?${q}`, { headers: FORGE_TOKEN ? { authorization: 'Bearer ' + FORGE_TOKEN } : {}, signal: AbortSignal.timeout(90_000) }).catch(e => ({ ok: false, status: e.name }));
-  if (!r.ok) {
-    if (attempt < 3) { console.warn(`  cover-forge → ${r.status}, retry ${attempt}/2 in 5 s`); await new Promise(res => setTimeout(res, 5000)); return forge(meta, attempt + 1); }
-    throw new Error(`cover-forge → ${r.status}`);
-  }
-  return { png: Buffer.from(await r.arrayBuffer()), layout: r.headers.get('x-cover-layout') };
-}
+const loadLedger = () => readLedger(LEDGER);
+const saveLedger = l => writeLedger(LEDGER, l);
 
 const ledger = await loadLedger();
 
@@ -116,7 +75,7 @@ if (REVERT) {
 
 const types = ARTISTS ? ['MusicAlbum', 'MusicArtist'] : ['MusicAlbum'];
 const summary = { listed: 0, withImage: 0, noImage: 0, inLedger: 0, ours: 0, unchanged: 0, candidates: 0, done: 0, failed: 0 };
-const metaHash = meta => createHash('sha256').update(JSON.stringify([meta, SIZE, SEED])).digest('hex').slice(0, 16);
+const metaHash = meta => hashMeta(meta, SIZE, SEED);
 const plan = [];
 for (const type of types) {
   const items = await listItems(type);
@@ -147,7 +106,7 @@ if (!APPLY) await fs.mkdir(OUT, { recursive: true });
 for (const { it, reason } of todo) {
   const meta = metaFor(it);
   const hash = metaHash(meta);
-  const label = `${it.Type === 'MusicArtist' ? '[artist] ' : ''}${meta.artist ? meta.artist + ' — ' : ''}${meta.title}${meta.year ? ' (' + meta.year + ')' : ''}${meta.label ? ' · ' + meta.label : ''}`;
+  const label = metaLabel(it, meta);
   try {
     const { png, layout } = await forge(meta);
     if (!APPLY) {

@@ -73,6 +73,7 @@ the Jellyfin backfill — `ledger.json` is what protects real covers). Memory: ~
 | endpoint | returns |
 |---|---|
 | `GET /cover.png?artist=&title=&year=&label=&cat=&layout=1a\|1b\|1c\|1d&seed=0&size=1000&grain=1&fade=0.14` | square PNG, `size` 64..2000 (default 1000) |
+| `GET /cover.jpg?<same params>` (or `/cover.png?…&format=jpeg`) | the same cover as a JPEG (quality `JPEG_QUALITY`, default 90) |
 | `GET /sheet.png?<same params>` | 2x2 contact sheet of all four layouts (width = `size`, height = size × 1.084) |
 | `GET /healthz` | `{"ok":true,"renders":…,"cacheHits":…,"avgMs":…,"rssMb":…}` |
 
@@ -113,6 +114,27 @@ name, `ProductionYear`, first studio as the label. Folder-derived names are clea
 it matches the album's year (or adopted as the year if the album has none), and a disc/track-style
 `2 - ` / `1. ` prefix is dropped; every change is logged `before → after`. The renderer itself stays literal. Run it from cron / a systemd timer after Jellyfin's
 own "download missing images" task, so real artwork wins.
+
+## Folder backfill (folder.jpg)
+
+`bin/backfill-folder.mjs` writes the **same** placeholder (same hash, seed and layout as the Jellyfin upload) as
+`folder.jpg` into the album folder on disk for every album in the Jellyfin backfill ledger, so file-based players
+(e.g. a music server that reads `folder.*` / `cover.*`) show identical art. Details: [`docs/COVER-FORGE.md`](docs/COVER-FORGE.md).
+
+```bash
+# .env: MUSIC_DIR (host music tree, mounted rw at /music), JELLYFIN_MUSIC_PREFIX (the tree as Jellyfin sees it)
+docker compose exec cover-forge node bin/backfill-folder.mjs --dry-run --limit 10   # default; JPEGs go to /data/backfill-folder-dry/
+docker compose exec cover-forge node bin/backfill-folder.mjs --apply
+```
+
+| flag | |
+|---|---|
+| `--dry-run` (default) | print the plan (planned / skipped-existing-cover / skipped-in-ledger / unmapped-path / missing-dir) and write the JPEGs to `--out` (default `/data/backfill-folder-dry/`), nothing into the music tree |
+| `--apply` | write `folder.jpg` (1000 px, JPEG q90) into each album folder; folders with any `folder.*`/`cover.*`/`front.*`/`album.*` image are skipped |
+| `--refresh` | rewrite ledger items, but only where `folder.jpg` is still byte-identical to what we wrote |
+| `--revert [--apply]` | delete our `folder.jpg` files where the sha256 still matches the ledger; changed files are kept |
+| `--limit N`, `--size N`, `--seed N` | as for the Jellyfin backfill |
+| `--ledger PATH` | default `/data/ledger-folder.json` (`LEDGER_FOLDER`) — `{items: {<itemId>: {path, sha256, hash, layout, writtenAt}}}` |
 
 ## Development
 

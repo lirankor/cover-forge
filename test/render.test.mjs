@@ -62,6 +62,20 @@ test('default size, determinism and cache', async () => {
   assert.ok(h.ok && h.cacheHits >= 1);
 });
 
+test('format=jpeg (and /cover.jpg) returns the same cover as a JPEG', async () => {
+  const q = 'artist=Marisol+Ortega&title=Blue&year=1969&label=Cinder+Sound&size=400';
+  const r = await get('/cover.png?' + q + '&format=jpeg');
+  assert.equal(r.status, 200); assert.equal(r.headers.get('content-type'), 'image/jpeg');
+  const buf = Buffer.from(await r.arrayBuffer());
+  assert.equal(buf.subarray(0, 3).toString('hex'), 'ffd8ff', 'JPEG signature');
+  const png = await get('/cover.png?' + q);
+  assert.equal(png.headers.get('content-type'), 'image/png');
+  assert.equal(png.headers.get('x-cover-layout'), r.headers.get('x-cover-layout'));
+  const r2 = await get('/cover.jpg?' + q);
+  assert.equal(r2.headers.get('content-type'), 'image/jpeg');
+  assert.ok(Buffer.from(await r2.arrayBuffer()).equals(buf), 'cached JPEG is byte-identical');
+});
+
 test('sheet keeps the 2x2 aspect at the requested width', async () => {
   const r = await get('/sheet.png?artist=Okonkwo+Trio&title=Lagos+After+Dark&year=1977&label=Palm+Wine+Recs&size=712');
   assert.equal(r.status, 200);
